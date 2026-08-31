@@ -1,5 +1,3 @@
-1- загальна структура 
-
 ai-mini/
 ├── config/
 │   ├── cube_dna.json          # базова конфігурація
@@ -27,13 +25,6 @@ ai-mini/
 │   └── test_agent.py          # тести
 └── requirements.txt
 
-requiremnts.txt
-
-sentence-transformers==2.2.2
-numpy
-
-
-
 ai-mini/
 ├── config/cube_dna.json
 ├── core/
@@ -48,20 +39,11 @@ ai-mini/
 ├── data/...
 └── requirements.txt      # оновлений
 
-1. Структура папок
-
-mkdir -p ai-mini/{config,core,data/vector_store,scripts}
-
-
-2. Файли, які треба створити
-
 requirements.txt
-
 
 sentence-transformers==2.2.2
 numpy
 tqdm
-
 
 data/vector_store/schema.sql
 
