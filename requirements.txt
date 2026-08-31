@@ -1,0 +1,25 @@
+# === CORE DEPENDENCIES ===
+# Трансформери і LLM
+torch>=2.0.0
+transformers>=4.30.0
+safetensors>=0.4.0
+
+# Векторна пам'ять і пошук
+sentence-transformers>=2.2.2
+faiss-cpu>=1.7.4  # або faiss-gpu для CUDA
+numpy>=1.24.0
+rank-bm25>=0.2.2
+
+# База даних
+sqlite3  # встроєний в Python
+
+# === UTILITY ===
+tqdm>=4.65.0  # прогрес-бари
+pydantic>=2.0.0  # валідація даних
+python-dotenv>=1.0.0  # для .env файлів
+
+# === DEV DEPENDENCIES (опціонально) ===
+# pytest>=7.0.0  # тестування
+# black>=23.0.0  # форматування коду
+# flake8>=6.0.0  # лінтинг
+# jupyter>=1.0.0  # notebook для експериментів
