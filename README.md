@@ -27,3 +27,24 @@ ai-mini/
 │   └── test_agent.py          # тести
 └── requirements.txt
 
+requiremnts.txt
+
+sentence-transformers==2.2.2
+numpy
+
+
+
+ai-mini/
+├── config/cube_dna.json
+├── core/
+│   ├── agent.py          # оновлений
+│   ├── llm.py            # НОВИЙ: підключення трансформера
+│   ├── memory.py         # ОНОВЛЕНИЙ: гібридний RAG (Vector + BM25)
+│   ├── token_wallet.py   # ТВІЙ: гаманець токенів
+│   ├── learner.py        # НОВИЙ: самонавчання на фідбеку
+│   ├── weight.py         # твій (формула)
+│   ├── safeguards.py     # твій (запобіжники)
+│   └── ...
+├── data/...
+└── requirements.txt      # оновлений
+
