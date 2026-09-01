@@ -1,130 +1,181 @@
-ai-mini/
-├── config/
-│   ├── cube_dna.json          # базова конфігурація
-│   └── safeguards_config.json # налаштування запобіжників
-├── core/
-│   ├── __init__.py
-│   ├── agent.py               # головний клас AIMini
-│   ├── memory.py              # SQLite + векторний пошук (RAG)
-│   ├── black_box.py           # чорна скриня + формула
-│   ├── weight.py              # формула ваги
-│   ├── safeguards.py          # запобіжники (локальні + системні)
-│   ├── initiative.py          # ініціатива (сам може писати)
-│   ├── language.py            # мовна підтримка
-│   ├── photo_learner.py       # навчання по фото
-│   ├── billiard.py            # фізичний двигун більярду
-│   └── network_grid.py        # сітка (для майбутньої нейромережі)
-├── data/
-│   ├── vector_store/
-│   │   └── ai_mini.db         # SQLite з ембедінгами
-│   ├── learned/               # збережені знання з фото
-│   └── token_wallet.json      # гаманець токенів
-├── scripts/
-│   ├── seed_data.py           # наповнення RAG
-│   ├── run_agent.py           # запуск агента
-│   └── test_agent.py          # тести
-└── requirements.txt
+"""
+🤖 AI-МІНІ - Мініатюрний АІ-агент
+Версія: 0.1.0
 
-ai-mini/
-├── config/cube_dna.json
-├── core/
-│   ├── agent.py          # оновлений
-│   ├── llm.py            # НОВИЙ: підключення трансформера
-│   ├── memory.py         # ОНОВЛЕНИЙ: гібридний RAG (Vector + BM25)
-│   ├── token_wallet.py   # ТВІЙ: гаманець токенів
-│   ├── learner.py        # НОВИЙ: самонавчання на фідбеку
-│   ├── weight.py         # твій (формула)
-│   ├── safeguards.py     # твій (запобіжники)
-│   └── ...
-├── data/...
-└── requirements.txt      # оновлений
+📖 ПУТІВНИК ПО СТРУКТУРІ ПРОЕКТУ
+================================
 
-requirements.txt
+## 📁 Структура каталогів
 
-sentence-transformers==2.2.2
-numpy
-tqdm
+core/
+├── agent.py              ✅ Основний клас AIMini (об'єднаний)
+├── memory.py             ✅ HybridRAG (Vector + BM25 пошук)
+├── llm.py                ✅ LocalLLM (Qwen трансформер)
+├── token_wallet.py       ✅ TokenWallet (управління токенами)
+├── weight.py             ✅ WeightFormula (формула ваги дій)
+├── learner.py            ✅ AdaptiveLearner (самонавчання)
+├── safeguards.py         ✅ SystemSafeguard (запобіжники)
+├── initiative.py         ✅ Initiative (ініціатива агента)
+├── ai_mini.py            ✅ Утиліти
+├── gomoku_nn.py          ✅ Гра Гомоку з нейромережею
+├── photo_learner.py      ✅ Навчання на зображеннях
+└── __init__.py           ✅ Package init
 
-data/vector_store/schema.sql
+data/
+├── vector_store/
+│   └── ai_mini.db        📦 SQLite база пам'яті
 
-CREATE TABLE IF NOT EXISTS documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT,
-    source TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+scripts/
+├── (майбутні скрипти)
 
-CREATE TABLE IF NOT EXISTS chunks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id INTEGER REFERENCES documents(id),
-    content TEXT NOT NULL,
-    chunk_index INTEGER,
-    embedding BLOB,
-    metadata TEXT
-);
+main.py                    🚀 Точка входу (interactive + demo режими)
+requirements.txt           📋 Залежності
+README.md                  📚 Документація
 
-CREATE TABLE IF NOT EXISTS model_config (
-    id INTEGER PRIMARY KEY,
-    model_name TEXT NOT NULL,
-    dimensions INTEGER NOT NULL,
-    active BOOLEAN DEFAULT 1
-);
+## 🚀 ШВИДКИЙ СТАРТ
 
-INSERT OR IGNORE INTO model_config (id, model_name, dimensions, active)
-VALUES (1, 'all-MiniLM-L6-v2', 384, 1);
+### Установка:
+```bash
+pip install -r requirements.txt
+```
 
+### Запуск інтерактивного режиму:
+```bash
+python main.py
+```
 
+### Запуск демо (автотести):
+```bash
+python main.py --mode demo
+```
 
-core/__init__.py — порожній файл
+## 📚 ОСНОВНІ КОМПОНЕНТИ
 
-core/embedding_store.py
+### 1️⃣ AIMini (core/agent.py)
+Основний клас агента з інтеграцією всіх модулів:
+- Гібридна пам'ять (RAG)
+- LLM генерація
+- Управління токенами
+- Формула ваги дій
+- Адаптивне навчання
+- Системні запобіжники
 
-import sqlite3
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from typing import List, Tuple, Optional
+### 2️⃣ HybridRAG (core/memory.py)
+Розумна система пам'яті:
+- Векторний пошук (FAISS, all-MiniLM-L6-v2)
+- Ключовий пошук (BM25)
+- Reciprocal Rank Fusion (RRF) для об'єднання
+- SQLite сховище
 
-def float32_to_blob(floats):
-    return floats.astype(np.float32).tobytes()
+### 3️⃣ LocalLLM (core/llm.py)
+Локальна модель мови:
+- Qwen/Qwen2-1.5B-Instruct (за замовчуванням)
+- CUDA підтримка
+- Chat template
+- Параметри температури
 
-def blob_to_float32(blob, dims):
-    return np.frombuffer(blob, dtype=np.float32).reshape(-1, dims)
+### 4️⃣ TokenWallet (core/token_wallet.py)
+Система управління ресурсами:
+- Витрати токенів
+- Заробіток за зворотний зв'язок
+- Історія операцій
+- JSON сховище
 
-class EmbeddingStore:
-    def __init__(self, db_path, model_name="all-MiniLM-L6-v2"):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.model = SentenceTransformer(model_name)
-        cfg = self.conn.execute("SELECT dimensions FROM model_config WHERE active=1 LIMIT 1").fetchone()
-        self.dimensions = cfg[0] if cfg else 384
+### 5️⃣ WeightFormula (core/weight.py)
+Розумне рішення про дії:
+- Оцінка складності запиту
+- Виявлення новизни
+- Перевірка терміновості
+- ROI (Return On Investment)
 
-    def add_document(self, title, source, chunks):
-        cur = self.conn.cursor()
-        cur.execute("INSERT INTO documents (title, source) VALUES (?, ?)", (title, source))
-        doc_id = cur.lastrowid
-        for idx, content, metadata in chunks:
-            emb = self.model.encode(content, convert_to_numpy=True)
-            cur.execute(
-                "INSERT INTO chunks (document_id, content, chunk_index, embedding, metadata) VALUES (?, ?, ?, ?, ?)",
-                (doc_id, content, idx, float32_to_blob(emb), metadata)
-            )
-        self.conn.commit()
-        return doc_id
+## 🎮 КОМАНДИ В ІНТЕРАКТИВНОМУ РЕЖИМІ
 
-    def similarity_search(self, query, top_k=5):
-        q_emb = self.model.encode(query, convert_to_numpy=True)
-        rows = self.conn.execute("SELECT id, content, embedding, metadata FROM chunks").fetchall()
-        if not rows:
-            return []
-        ids, contents, blobs, metas = [], [], [], []
-        for r in rows:
-            ids.append(r[0])
-            contents.append(r[1])
-            blobs.append(r[2])
-            metas.append(r[3])
-        embs = np.vstack([blob_to_float32(b, self.dimensions) for b in blobs])
-        qn = q_emb / (np.linalg.norm(q_emb) + 1e-10)
-        embs_n = embs / (np.linalg.norm(embs, axis=1, keepdims=True) + 1e-10)
-        sims = (embs_n @ qn).reshape(-1)
-        top_idx = np.argsort(-sims)[:top_k]
-        return [{"chunk_id": ids[i], "content": contents[i], "score": float(sims[i]), "metadata": metas[i]} for i in top_idx]
+```
+/привіт         - Привітання
+/статус         - Показати статус агента
+/пам'ять        - Показати збережені дані
+/очистити       - Очистити контекст діалогу
+/поповнити N    - Додати N токенів
+/як_тебе_звати  - Дізнатися ім'я агента
+/добре          - Позитивний зворотний зв'язок
+/погано         - Негативний зворотний зв'язок
+/кінець         - Вихід
+```
 
+## 🔧 КОНФІГУРАЦІЯ
+
+Агент завантажує конфіг з `config/cube_dna.json` (опціонально).
+
+Основні параметри можна змінити в `core/agent.py`:
+- `model_name` - LLM модель
+- `top_k` - кількість результатів пошуку
+- `alpha` - баланс Vector/BM25
+- Та інші в WeightFormula
+
+## 📊 ПРИКЛАД ВИКОРИСТАННЯ
+
+```python
+from core.agent import AIMini
+
+# Ініціалізація
+agent = AIMini()
+
+# Обробка запиту
+response = agent.process("Привіт, як тебе звати?")
+print(response)
+
+# Зворотний зв'язок
+agent.feedback(is_positive=True)
+
+# Статус
+status = agent.status()
+print(f"Токенів: {status['tokens']}")
+```
+
+## 🧠 АРХІТЕКТУРА
+
+```
+┌─────────────────────────────┐
+│      User Input (main.py)   │
+└──────────────┬──────────────┘
+               │
+        ┌──────▼──────┐
+        │   AIMini    │
+        │  (agent.py) │
+        └──────┬──────┘
+               │
+    ┌──────────┼──────────┐
+    │          │          │
+    ▼          ▼          ▼
+┌────────┐ ┌────────┐ ┌──────────┐
+│ Memory │ │  LLM   │ │ Safeguard│
+│(RAG)   │ │ (Local)│ │          │
+└────────┘ └────────┘ └──────────┘
+    │          │          │
+    └──────────┼──────────┘
+               │
+        ┌──────▼──────┐
+        │   Output    │
+        └─────────────┘
+```
+
+## 🐛 DEBUG / РОЗВИТОК
+
+- Логи в консоль при завантаженні
+- Статус агента: `/статус`
+- Історія токенів у `data/token_wallet.json`
+- БД пам'яті у `data/vector_store/ai_mini.db`
+
+## 📝 ЛІЦЕНЗІЯ
+
+MIT License - Вільно використовувати та модифікувати
+
+## 🤝 КОНТИБЮШН
+
+Буду рада будь-яким улучшенням! 💜
+
+---
+
+**Версія:** 0.1.0  
+**Останнє оновлення:** 2026-09-01
+"""
