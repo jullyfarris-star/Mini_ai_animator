@@ -1,0 +1,171 @@
+```python
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
+import urllib.parse
+import math
+
+# Світ
+WORLD_OBJECTS = [
+    {"id": 1, "x": 10, "z": 5,  "r": 2,  "color": 0x00aaff, "name": "Будинок"},
+    {"id": 2, "x": -5, "z": 2,  "r": 1,  "color": 0x00ff00, "name": "Дерево"},
+    {"id": 3, "x": 0,  "z": 20, "r": 4,  "color": 0xffaa00, "name": "Висотка"},
+    {"id": 4, "x": 15, "z": -5, "r": 1.5, "color": 0xffff00, "name": "Машина"},
+]
+
+def ray_vs_circle(ray_origin, ray_angle, circle):
+    dx = math.cos(ray_angle)
+    dz = math.sin(ray_angle)
+    fx = circle["x"] - ray_origin[0]
+    fz = circle["z"] - ray_origin[1]
+    a = fx * dx + fz * dz
+    if a < 0: return None, None
+    closest_x = ray_origin[0] + a * dx
+    closest_z = ray_origin[1] + a * dz
+    dist_to_center = math.sqrt((closest_x - circle["x"])**2 + (closest_z - circle["z"])**2)
+    if dist_to_center <= circle["r"]:
+        return a, circle
+    return None, None
+
+class SimulationHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed_url = urllib.parse.urlparse(self.path)
+        
+        if parsed_url.path == "/get_scene":
+            query = urllib.parse.parse_qs(parsed_url.query)
+            ax = float(query.get("ax", [0])[0])
+            az = float(query.get("az", [0])[0])
+            agent_pos = (ax, az)
+
+            # Збільшуємо кількість променів у 30 разів (360 градусів з кроком 1 градус)
+            NUMBER_OF_RAYS = 360 
+            rays_data = [] # Зберігатимемо напрямки та відстані для малювання ліній
+            
+            objects_seen = []
+            seen_ids = set()
+
+            for i in range(NUMBER_OF_RAYS):
+                angle = (i / NUMBER_OF_RAYS) * 2 * math.pi
+                closest_obj = None
+                min_dist = 30.0 # Максимальна дальність бачення
+                
+                for obj in WORLD_OBJECTS:
+                    dist, hit_obj = ray_vs_circle(agent_pos, angle, obj)
+                    if hit_obj and dist < min_dist:
+                        min_dist = dist
+                        closest_obj = hit_obj
+                
+                # Запам'ятовуємо дані променя (кут, куди влучив або чи пішов у нікуди)
+                hit_x = ax + math.cos(angle) * min_dist
+                hit_z = az + math.sin(angle) * min_dist
+                rays_data.append({"angle": angle, "end_x": hit_x, "end_z": hit_z, "hit": closest_obj is not None})
+
+                if closest_obj and closest_obj["id"] not in seen_ids:
+                    seen_ids.add(closest_obj["id"])
+                    objects_seen.append(closest_obj)
+
+            # Повертаємо і об'єкти, і самі промені, щоб намалювати їх у браузері
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"objects": objects_seen, "rays": rays_data}).encode("utf-8"))
+            return
+
+        if self.path == "/":
+            self.send_response(200)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            
+            html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>360° Ray Casting</title>
+                <style>body { margin: 0; overflow: hidden; background: #111; }</style>
+            </head>
+            <body>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+                <script>
+                    const scene = new THREE.Scene();
+                    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+                    const renderer = new THREE.WebGLRenderer();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                    document.body.appendChild(renderer.domElement);
+
+                    // Земля
+                    const grid = new THREE.GridHelper(50, 20);
+                    scene.add(grid);
+
+                    // Агент
+                    const agentGeo = new THREE.SphereGeometry(0.5, 16, 16);
+                    const agentMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                    const agent = new THREE.Mesh(agentGeo, agentMat);
+                    agent.position.set(0, 0.5, 0);
+                    scene.add(agent);
+
+                    let agentX = 0;
+                    let agentZ = 0;
+
+                    async function scan() {
+                        // Агент сканує світ 60 разів на секунду
+                        const response = await fetch(`/get_scene?ax=${agentX}&az=${agentZ}`);
+                        const data = await response.json();
+
+                        // Очищення старих об'єктів (крім сітки та агента)
+                        while(scene.children.length > 2){ 
+                            scene.remove(scene.children[scene.children.length - 1]); 
+                        }
+
+                        // Малюємо 360 променів (це навантаження на браузер, не на сервер!)
+                        data.rays.forEach(ray => {
+                            const points = [
+                                new THREE.Vector3(agentX, 0.2, agentZ),
+                                new THREE.Vector3(ray.end_x, 0.2, ray.end_z)
+                            ];
+                            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                            // Якщо влучили - червоний промінь, якщо ні - сірий
+                            const color = ray.hit ? 0xff3333 : 0x444444; 
+                            const material = new THREE.LineBasicMaterial({ color: color });
+                            const line = new THREE.Line(geometry, material);
+                            scene.add(line);
+                        });
+
+                        // Малюємо знайдені об'єкти
+                        data.objects.forEach(obj => {
+                            const geo = new THREE.CylinderGeometry(obj.r, obj.r, 2, 16);
+                            const mat = new THREE.MeshBasicMaterial({ color: obj.color });
+                            const mesh = new THREE.Mesh(geo, mat);
+                            mesh.position.set(obj.x, 1, obj.z);
+                            scene.add(mesh);
+                        });
+                    }
+
+                    // Двигун симуляції
+                    let angle = 0;
+                    setInterval(() => {
+                        angle += 0.05;
+                        agentX = 10 * Math.cos(angle);
+                        agentZ = 10 * Math.sin(angle);
+                        agent.position.set(agentX, 0.5, agentZ);
+                        scan(); // Сканування в реальному часі!
+                    }, 50); // 20 разів на секунду (оновлення)
+
+                    camera.position.set(0, 30, 30);
+                    camera.lookAt(0, 0, 0);
+
+                    function animate() {
+                        requestAnimationFrame(animate);
+                        renderer.render(scene, camera);
+                    }
+                    animate();
+                </script>
+            </body>
+            </html>
+            """
+            self.wfile.write(html.encode("utf-8"))
+            return
+
+print("Запуск 360 Ray Casting: http://localhost:8080")
+httpd = HTTPServer(('localhost', 8080), SimulationHandler)
+httpd.serve_forever()
+```
+

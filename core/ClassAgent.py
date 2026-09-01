@@ -142,3 +142,4 @@ class AIMini:
         """Спроба автоматичного відновлення"""
         fixes = self.safeguard.auto_heal(self)
         return fixes
+
