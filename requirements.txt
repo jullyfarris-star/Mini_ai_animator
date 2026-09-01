@@ -17,6 +17,7 @@ sqlite3  # встроєний в Python
 tqdm>=4.65.0  # прогрес-бари
 pydantic>=2.0.0  # валідація даних
 python-dotenv>=1.0.0  # для .env файлів
+Pillow>=10.0.0
 
 # === DEV DEPENDENCIES (опціонально) ===
 # pytest>=7.0.0  # тестування
