@@ -1,0 +1,258 @@
+all-MiniLM-L6-v2 (384 dims)
+
+• Мінімум ресурсів — працює на будь-якому ноутбуці
+• Швидкий цикл розробки — не треба чекати хвилинами на генерацію ембедінгів
+• sqlite-vec літає з 384 dims
+• Зможемо швидко протестувати гібридний пошук, погратися з параметрами
+
+Але одразу закладаємо можливість росту 
+
+
+
+-- Робимо розмірність гнучкою
+CREATE TABLE model_config (
+    id INTEGER PRIMARY KEY,
+    model_name TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    active BOOLEAN DEFAULT 1
+);
+
+INSERT INTO model_config (id, model_name, dimensions) VALUES (1, 'all-MiniLM-L6-v2', 384);
+
+-- Векторний індекс теж параметризований
+CREATE VIRTUAL TABLE vec_chunks USING vec0(
+    chunk_id INTEGER PRIMARY KEY,
+    embedding float[384]   -- при міграції на BGE-M3 змінимо на 1024
+);
+
+
+
+План міграції, коли прийде час:
+1. Додаємо model_config для BGE-M3
+2. Перегенеруємо ембедінги для всіх чанків (окрема колонка або нова таблиця)
+3. Перестворюємо vec0 індекс з float\[1024]
+4. Переключаємо active модель
+
+Чудово — робимо. Я підготую конкретну реалізацію MVP для RAG-сховища на SQLite з початковою моделлю ембедінгів all‑MiniLM‑L6‑v2 (384 dims). План: дам готові файли/фрагменти коду, інструкцію по запуску і короткий шлях міграції до векторного розширення (sqlite‑vec або pgvector) коли будемо масштабуватись.
+
+Я припускаю одну річ: твій проєкт на Python — якщо ні, скажи, швидко адаптую під іншу мову.
+
+Що отримаєш в цьому повідомленні
+• requirements.txt
+• schema.sql (таблиці + гнучка модель-конфігурація)
+• scripts/seed_data.py — наповнення документів + генерація ембедінгів
+• core/embedding_store.py — простий клас для збереження/пошуку (MVP: пошук в пам'яті)
+• scripts/run.py — приклад пошукового запиту (RAG retrieval)
+• Коротка інструкція запуску і план міграції на sqlite-vec/pgvector
+
+1) requirements.txt
+(копіюй у корінь проекту)
+• sentence-transformers==2.2.2
+• numpy
+• sqlite3 (вбудовано в Python)
+• tqdm
+• typing_extensions
+
+(Якщо хочеш пізніше підключити sqlite-vec або pgvector, додамо відповідні пакети в requirements.)
+
+2) schema.sql
+(поміщаємo в data/vector_store/schema.sqi)
+
+
+-- documents: основні документи / джерела
+CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    source TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- chunks: частини документів, які будемо індексувати
+CREATE TABLE IF NOT EXISTS chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER REFERENCES documents(id),
+    content TEXT NOT NULL,
+    chunk_index INTEGER,
+    embedding BLOB,    -- тут зберігаємо масив float32 як BLOB
+    metadata TEXT
+);
+
+-- модельна конфігурація для майбутніх міграцій
+CREATE TABLE IF NOT EXISTS model_config (
+    id INTEGER PRIMARY KEY,
+    model_name TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    active BOOLEAN DEFAULT 1
+);
+
+-- початкова конфігурація моделі
+INSERT OR IGNORE INTO model_config (id, model_name, dimensions, active)
+VALUES (1, 'all-MiniLM-L6-v2', 384, 1);
+
+
+
+
+
+Примітка: для MVP ми зберігаємо вектор як BLOB (float32). Пошук виконуємо в Python (завантажуємо ембедінги і рахуємо близькість). Коли перейдемо на sqlite‑vec або pgvector — змінимо тип і зможемо виконувати пошук прямо в SQL.
+
+3) core/embedding_store.py
+(помістити в core/)
+
+
+# core/embedding_store.py
+import sqlite3
+import numpy as np
+import io
+from sentence_transformers import SentenceTransformer
+from typing import List, Tuple, Optional
+
+def float32_to_blob(floats: np.ndarray) -> bytes:
+    return floats.astype(np.float32).tobytes()
+
+def blob_to_float32(blob: bytes, dims: int) -> np.ndarray:
+    return np.frombuffer(blob, dtype=np.float32).reshape(-1, dims)
+
+class EmbeddingStore:
+    def __init__(self, db_path: str, model_name: str = "all-MiniLM-L6-v2"):
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.model = SentenceTransformer(model_name)
+        cfg = self.conn.execute("SELECT dimensions FROM model_config WHERE active=1 LIMIT 1").fetchone()
+        self.dimensions = cfg[0] if cfg else 384
+
+    def add_document(self, title: str, source: str, chunks: List[Tuple[int, str, Optional[str]]]):
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO documents (title, source) VALUES (?, ?)", (title, source))
+        doc_id = cur.lastrowid
+        for idx, content, metadata in chunks:
+            emb = self.model.encode(content, convert_to_numpy=True)
+            cur.execute(
+                "INSERT INTO chunks (document_id, content, chunk_index, embedding, metadata) VALUES (?, ?, ?, ?, ?)",
+                (doc_id, content, idx, float32_to_blob(emb), metadata)
+            )
+        self.conn.commit()
+        return doc_id
+
+    def similarity_search(self, query: str, top_k: int = 5):
+        q_emb = self.model.encode(query, convert_to_numpy=True)
+        # Змінна: завантажуємо всі embeddings у пам'ять (підходить для MVP)
+        rows = self.conn.execute("SELECT id, content, embedding, metadata FROM chunks").fetchall()
+        ids, contents, blobs, metas = [], [], [], []
+        for r in rows:
+            ids.append(r[0])
+            contents.append(r[1])
+            blobs.append(r[2])
+            metas.append(r[3])
+        if not blobs:
+            return []
+
+        embs = np.vstack([blob_to_float32(b, self.dimensions) for b in blobs])
+        # embs має форму (N, dims)
+        # Косинусна схожість
+        def normalize(x):
+            norm = np.linalg.norm(x)
+            return x / (norm + 1e-10)
+        qn = normalize(q_emb)
+        embs_n = embs / (np.linalg.norm(embs, axis=1, keepdims=True) + 1e-10)
+        sims = (embs_n @ qn).reshape(-1)
+        top_idx = np.argsort(-sims)[:top_k]
+        results = []
+        for i in top_idx:
+            results.append({
+                "chunk_id": ids[i],
+                "content": contents[i],
+                "score": float(sims[i]),
+                "metadata": metas[i]
+            })
+        return results
+
+
+
+Пояснення: для MVP ми:
+• використовуємо sentence-transformers для ембедінгів;
+• зберігаємо embedding як BLOB float32;
+• робимо швидкий in-memory пошук (підходить для тисяч/десятків тисяч чанків на локальному старті).
+
+4) scripts/seed_data.py
+(приклад наповнення кількома документами / чанками)
+
+# scripts/seed_data.py
+import os
+from core.embedding_store import EmbeddingStore
+
+DB = os.path.join("data", "vector_store", "ai_mini.db")
+
+def chunk_text(text: str, size: int = 300, overlap: int = 50):
+    tokens = text.split()
+    chunks = []
+    i = 0
+    idx = 0
+    while i < len(tokens):
+        chunk = " ".join(tokens[i:i+size])
+        chunks.append((idx, chunk, None))
+        idx += 1
+        i += size - overlap
+    return chunks
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    store = EmbeddingStore(DB)
+    # Приклад: два документи
+    doc1 = "Це перший документ. Тут описано базову інформацію про АІміні..."
+    chunks1 = chunk_text(doc1, size=50, overlap=10)
+    store.add_document("Intro AImini", "seed", chunks1)
+
+    doc2 = "Інструкція з використання: як робити пошук, як додавати нові дані..."
+    chunks2 = chunk_text(doc2, size=50, overlap=10)
+    store.add_document("Howto", "seed", chunks2)
+
+    print("Seed завершено")
+
+
+5) scripts/run.py
+(приклад запуску пошуку та отримання top-k чанків)
+
+# scripts/run.py
+import os
+from core.embedding_store import EmbeddingStore
+
+DB = os.path.join("data", "vector_store", "ai_mini.db")
+
+if __name__ == "__main__":
+    store = EmbeddingStore(DB)
+    while True:
+        q = input("Запит: ").strip()
+        if not q:
+            break
+        results = store.similarity_search(q, top_k=5)
+        for r in results:
+            print(f"[{r['chunk_id']}] score={r['score']:.4f}")
+            print(r['content'])
+            print("---")
+
+
+
+6) Інструкція запуску (локально)
+1. Створи віртуальне середовище та встанови пакети:
+   • python -m venv .venv
+   • source .venv/bin/activate (або .venv\Scripts\activate на Windows)
+   • pip install -r requirements.txt
+2. Ініціалізація БД:
+   • sqlite3 data/vector_store/ai_mini.db < data/vector_store/schema.sql
+     (або виконати schema.sql через Python)
+3. Наповнити даними:
+   • python scripts/seed_data.py
+4. Запустити простий пошук:
+   • python scripts/run.py
+
+7) План міграції / шлях росту (коли вийдемо за межі MVP)
+• Крок 1 (нативний векторний індекс): додати sqlite‑vec (або інший розширювач) і створити VIRTUAL TABLE, щоб робити ORDER BY distance у SQL; або зберегти паралельну таблицю embeddings у форматі, який вимагає sqlite-vec.
+• Крок 2 (міграція розмірності): додати новий запис у model_config з model_name=BGE‑M3 і dimensions=1024, згенерувати ембедінги в нову колонку або таблицю (batch job), створити відповідний векторний індекс.
+• Крок 3 (шардінг / зовнішня векторна БД): коли дані ростуть (мільйони чанків), переходити на PostgreSQL+pgvector або окрему векторну СУБД (Milvus, Weaviate, Chroma), зберігаючи SQL для метаданих і гібридного фільтрування.
+• Додатково: кешування часто-запитуваних embeddings у пам'яті; background job для перестроювання індексу після великих вставок.
+
+8) Оптимізації / рекомендації
+• Для роботи на ноуті: залишай all‑MiniLM для ембедінгів, індекс і пошук виконуй в пам'яті або з простим SQL.
+• Для кращої якості при тюнингу: спробувати збільшити розмір chunk (щоб контекст був повніший) або використовувати BGE‑M3 на етапі phase‑2.
+• Зберігай metadata JSON (наприклад, назва розділу, URL, timestamp) — це дуже корисно для фільтрації гібридних запитів.
+
+---

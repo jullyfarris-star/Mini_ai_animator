@@ -1,0 +1,42 @@
+UENUM(BlueprintType)
+enum class EFoldType : uint8 {
+    Mountain = 1, // Зовнішній згин (+)
+    Valley = 255 // Внутрішній згин (-) -> байтове представлення -1
+};
+
+USTRUCT(BlueprintType)
+struct FOrigamiJoint {
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere)
+    FVector AxisOrigin; // Точка початку радіус-вектора згину
+    
+    UPROPERTY(EditAnywhere)
+    FVector AxisDirection; // Напрямок ребра згину
+    
+    UPROPERTY(EditAnywhere)
+    EFoldType FoldDirection; // Тип згину (+1 / -1)
+};
+
+// Менеджер трансформації архітектури
+UCLASS()
+class AOrigamiCubeManager : public AActor {
+    GENERATED_BODY()
+
+public:
+    // Поточний кут згортання (від 0 до 90 градусів)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Origami")
+    float FoldProgress;
+
+    UFUNCTION(BlueprintCallable, Category = "Origami")
+    void UpdateCubeTransformation() {
+        if (FoldProgress >= 90.0f) {
+            TriggerSimulatorLaunch(); // Запуск, коли 6 площин замкнули куб
+        }
+    }
+
+private:
+    void TriggerSimulatorLaunch() {
+        // Активувати Головного Агента, підключити LLM до Аватара
+    }
+};

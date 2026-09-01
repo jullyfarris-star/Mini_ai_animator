@@ -1,3 +1,5 @@
+2. Основний клас
+
 # core/agent.py
 import json
 import time
